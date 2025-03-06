@@ -50,12 +50,10 @@ def identify_bird():
         multi_response = multiple_responses(encoded_image)
         species_list = []
         for model, result in multi_response.items():
-            print(result)
             if result and 'species' in result:
                species_list.append(result['species'])
 
-        print(multi_response)
-        print('image_encoded')
+        print('multi_response',multi_response)
         # Create prompt for Gemini
 
         prompt = """
@@ -96,10 +94,9 @@ def identify_bird():
         }
         # Generate response from Gemini
         response = requests.post(url, json=data, headers=headers)
-        if response.status_code == 200:
-            print(response.json()['candidates'][0]['content']['parts'][0]['text'])
-        else:
+        if response.status_code != 200:
             print(f"Error: {response.status_code}, {response.text}")
+            
         
         # Parse the response to extract JSON
         response_text = response.json()['candidates'][0]['content']['parts'][0]['text']
@@ -112,13 +109,11 @@ def identify_bird():
         else:
             # Fallback if JSON format not detected
             return jsonify({'error': 'Failed to parse Gemini response'}), 500
-        print(json_content)
         bird_data = json.loads(json_content)
         
         # Fetch images for identified species
         species_images = []
         species_images = get_image_urls(title=bird_data['species'], limit=6)
-        print(species_images)
         # if len(species_images) == 0:
         #     species_images = fetch_species_images(bird_data['species'])
         
@@ -136,7 +131,6 @@ def identify_bird():
             'species_images': species_images,
             'variation_images': variation_images
         }   
-        print(result)
         
         return jsonify(result)
     
@@ -191,96 +185,6 @@ def fetch_single_image(species_name):
     images = fetch_species_images(species_name, max_images=1)
     return images[0] if images else ""
 
-# def get_image_urls(title, limit=5):
-#     """
-#     Get multiple image URLs for a Wikipedia article by title using a more reliable method.
-#     """
-#     # Base URL for the Wikipedia API
-#     api_url = "https://en.wikipedia.org/w/api.php"
-    
-#     # First, we need to get the pageId for the article
-#     params = {
-#         "action": "query",
-#         "format": "json",
-#         "titles": title,
-#     }
-    
-#     try:
-#         # Get page ID
-#         response = requests.get(api_url, params=params, timeout=10)
-#         data = response.json()
-#         print(data)
-        
-#         # Extract page ID
-#         pages = data.get("query", {}).get("pages", {})
-#         if not pages:
-#             logger.warning("No pages found in API response")
-#             return []
-            
-#         page_id = list(pages.keys())[0]
-        
-#         if page_id == "-1":
-#             logger.warning(f"Page '{title}' not found")
-#             return []
-            
-#         # Now use the more reliable approach: get all images directly from the page content
-#         params = {
-#             "action": "parse",
-#             "format": "json",
-#             "pageid": page_id,
-#             "prop": "images"  # Get all images from the page
-#         }
-        
-#         response = requests.get(api_url, params=params, timeout=10)
-#         data = response.json()
-#         print(data)
-        
-#         if "parse" not in data or "images" not in data["parse"]:
-#             logger.warning("No image data found in parse API response")
-#             return []
-            
-#         # Get image file names
-#         images = data["parse"]["images"]
-#         logger.info(f"Found {len(images)} images for page '{title}'")
-        
-#         # Filter out non-content images (commons icons, etc.)
-#         filtered_images = [img for img in images if not img.lower().startswith(('icon-', 'commons-', 'edit-'))]
-        
-#         # Apply limit
-#         filtered_images = filtered_images[:limit]
-        
-#         image_urls = []
-#         for img_name in filtered_images:
-#             # Now get the URL for each image
-#             img_params = {
-#                 "action": "query",
-#                 "format": "json",
-#                 "titles": f"File:{img_name}",  # Wikipedia image files are prefixed with "File:"
-#                 "prop": "imageinfo",
-#                 "iiprop": "url"
-#             }
-            
-#             img_response = requests.get(api_url, params=img_params, timeout=10)
-#             img_data = img_response.json()
-            
-#             img_pages = img_data.get("query", {}).get("pages", {})
-#             if not img_pages:
-#                 continue
-                
-#             img_page_id = list(img_pages.keys())[0]
-            
-#             if "imageinfo" in img_pages[img_page_id]:
-#                 image_url = img_pages[img_page_id]["imageinfo"][0]["url"]
-#                 image_urls.append(image_url)
-#                 logger.info(f"Found image URL: {image_url}")
-        
-#         logger.info(f"Successfully retrieved {len(image_urls)} image URLs")
-#         return image_urls
-        
-#     except Exception as e:
-#         logger.error(f"Error in get_image_urls: {str(e)}")
-#         raise Exception(f"Error processing Wikipedia data: {str(e)}")
-
 def get_image_urls(title, limit=5):
     """
     Get multiple image URLs for a Wikipedia article by title using multiple methods.
@@ -293,7 +197,7 @@ def get_image_urls(title, limit=5):
     
     try:
         # Method 1: Try using parse API first
-        logger.info(f"Attempting to get images for '{title}' using parse API")
+        # logger.info(f"Attempting to get images for '{title}' using parse API")
         
         # First, we need to get the pageId for the article
         params = {
@@ -526,9 +430,6 @@ def multiple_responses(image_data):
     except Exception as e:
         print(f"Error in llama_res: {str(e)}")
 
-
-    print('multi',responses)
-
     return responses if responses else None
 
 
@@ -539,7 +440,7 @@ def gemini_res(image_data):
         "Content-Type": "application/json"
     }
 
-    prompt = """ Classify what kind of bird 
+    prompt = """ Classify what kind of bird in JSON output
 
     Use this JSON schema:
 
@@ -566,12 +467,7 @@ def gemini_res(image_data):
         response = requests.post(url, json=data, headers=headers)
     except Exception as e:
         print(f"Error in gemini_res: {str(e)}")
-    
-    # if response.status_code == 200:
-    #     print(response.json()['candidates'][0]['content']['parts'][0]['text'])
-    # else:
-    #     print(f"Error: {response.status_code}, {response.text}")
-    #     return
+
 
     response_text = response.json()['candidates'][0]['content']['parts'][0]['text']
     # Extract JSON content from response if needed
@@ -596,7 +492,7 @@ def mistral_res(image_data):
         "Authorization": f"Bearer {MISTRAL_API_KEY}"
     }
 
-    prompt = """ Classify what kind of bird is in the Image
+    prompt = """ Classify what kind of bird is in the Image in JSON output
     Use this JSON schema:
 
     {'species': str, 'reason':give reason for why you have classified this bird species}
@@ -652,7 +548,7 @@ def llama_res(image_data):
         "Content-Type": "application/json"
     }
 
-    prompt = """ Classify what kind of bird 
+    prompt = """ Classify what kind of bird in ***JSON*** ONLY
 
     Use this JSON schema:
 
