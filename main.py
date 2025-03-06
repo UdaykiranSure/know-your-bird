@@ -1,5 +1,7 @@
 import base64
 from flask import Flask, request, jsonify
+import logging
+import sys
 from flask_cors import CORS  # Import CORS
 import os
 import requests
@@ -9,7 +11,12 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app, origins=["https://9000-idx-find-the-bird-1740898861496.cluster-3g4scxt2njdd6uovkqyfcabgo6.cloudworkstations.dev"])
 # Configure Google Gemini API
@@ -109,14 +116,16 @@ def identify_bird():
         bird_data = json.loads(json_content)
         
         # Fetch images for identified species
+        species_images = []
         species_images = get_image_urls(title=bird_data['species'], limit=6)
-        if len(species_images) == 0:
-            species_images = fetch_species_images(bird_data['species'])
+        print(species_images)
+        # if len(species_images) == 0:
+        #     species_images = fetch_species_images(bird_data['species'])
         
         # Fetch images for variation species
         variation_images = {}
         for variation in bird_data['variation_species']:
-            variation_images[variation] = fetch_single_image(variation)
+            variation_images[variation] = get_image_urls(variation,1)
         
         # Prepare final response
         result = {
@@ -182,188 +191,322 @@ def fetch_single_image(species_name):
     images = fetch_species_images(species_name, max_images=1)
     return images[0] if images else ""
 
-# def get_image_urls(title, limit=6):
+# def get_image_urls(title, limit=5):
 #     """
-#     Get multiple image URLs for a Wikipedia article by title.
-    
-#     Args:
-#         title (str): The title of the Wikipedia article
-#         limit (int): Maximum number of image URLs to return
-        
-#     Returns:
-#         list: List of image URLs, empty list if none found
+#     Get multiple image URLs for a Wikipedia article by title using a more reliable method.
 #     """
 #     # Base URL for the Wikipedia API
 #     api_url = "https://en.wikipedia.org/w/api.php"
     
-#     # Get list of images on the page
+#     # First, we need to get the pageId for the article
 #     params = {
 #         "action": "query",
 #         "format": "json",
 #         "titles": title,
-#         "prop": "images",
-#         "imlimit": 10,
-#         "origin":'*'
 #     }
     
-#     image_urls = []
-    
 #     try:
-#         response = requests.get(api_url, params=params)
+#         # Get page ID
+#         response = requests.get(api_url, params=params, timeout=10)
 #         data = response.json()
+#         print(data)
         
-#         # Extract page id from the response
-#         pages = data["query"]["pages"]
-#         # print("data",data)
-#         print('data',data)
+#         # Extract page ID
+#         pages = data.get("query", {}).get("pages", {})
+#         if not pages:
+#             logger.warning("No pages found in API response")
+#             return []
+            
 #         page_id = list(pages.keys())[0]
-      
         
-#         # Check if the page exists and has images
-#         if page_id == "-1" or "images" not in pages[page_id]:
-#             return image_urls
+#         if page_id == "-1":
+#             logger.warning(f"Page '{title}' not found")
+#             return []
+            
+#         # Now use the more reliable approach: get all images directly from the page content
+#         params = {
+#             "action": "parse",
+#             "format": "json",
+#             "pageid": page_id,
+#             "prop": "images"  # Get all images from the page
+#         }
         
+#         response = requests.get(api_url, params=params, timeout=10)
+#         data = response.json()
+#         print(data)
+        
+#         if "parse" not in data or "images" not in data["parse"]:
+#             logger.warning("No image data found in parse API response")
+#             return []
+            
 #         # Get image file names
-#         image_titles = [img["title"] for img in pages[page_id]["images"]]
+#         images = data["parse"]["images"]
+#         logger.info(f"Found {len(images)} images for page '{title}'")
         
-#         # Filter out non-image files (e.g., icons, svg files, etc. if desired)
-#         image_titles = [img for img in image_titles if not img.lower().endswith(('.svg', '.ico'))]
-#         print(image_titles)
+#         # Filter out non-content images (commons icons, etc.)
+#         filtered_images = [img for img in images if not img.lower().startswith(('icon-', 'commons-', 'edit-'))]
         
-#         # Limit the number of images to process
+#         # Apply limit
+#         filtered_images = filtered_images[:limit]
         
-#         # Now get URLs for these images
-#         for img_title in image_titles:
+#         image_urls = []
+#         for img_name in filtered_images:
+#             # Now get the URL for each image
 #             img_params = {
 #                 "action": "query",
 #                 "format": "json",
-#                 "titles": img_title,
+#                 "titles": f"File:{img_name}",  # Wikipedia image files are prefixed with "File:"
 #                 "prop": "imageinfo",
 #                 "iiprop": "url"
 #             }
             
-#             img_response = requests.get(api_url, params=img_params)
+#             img_response = requests.get(api_url, params=img_params, timeout=10)
 #             img_data = img_response.json()
             
-#             img_pages = img_data["query"]["pages"]
+#             img_pages = img_data.get("query", {}).get("pages", {})
+#             if not img_pages:
+#                 continue
+                
 #             img_page_id = list(img_pages.keys())[0]
             
 #             if "imageinfo" in img_pages[img_page_id]:
 #                 image_url = img_pages[img_page_id]["imageinfo"][0]["url"]
-#                 if image_url.lower().endswith(('.svg', '.ico','jpg')):
-#                   image_urls.append(image_url)
+#                 image_urls.append(image_url)
+#                 logger.info(f"Found image URL: {image_url}")
         
-#         return image_urls[:limit]
+#         logger.info(f"Successfully retrieved {len(image_urls)} image URLs")
+#         return image_urls
         
 #     except Exception as e:
-#         print(f"Error: {e}")
-#         return image_urls
+#         logger.error(f"Error in get_image_urls: {str(e)}")
+#         raise Exception(f"Error processing Wikipedia data: {str(e)}")
 
-# def get_image_urls(title, limit=5):
-#     """
-#     Get multiple image URLs for a Wikipedia article by title.
-    
-#     Args:
-#         title (str): The title of the Wikipedia article
-#         limit (int): Maximum number of image URLs to return
-        
-#     Returns:
-#         list: List of image URLs, empty list if none found
-#     """
-#     # Base URL for the Wikipedia API
-#     api_url = "https://en.wikipedia.org/w/api.php"
-    
-#     # Get list of images on the page
-#     params = {
-#         "action": "query",
-#         "format": "json",
-#         "titles": title,
-#         "prop": "images",
-#         "imlimit": 10,
-#     }
-    
-#     image_urls = []
-    
-#     try:
-#         response = requests.get(api_url, params=params)
-#         data = response.json()
-#         print(data)
-        
-#         # Extract page id from the response
-#         pages = data["query"]["pages"]
-#         # print("data",data)
-#         print('pages',pages)
-#         page_id = list(pages.keys())[0]
-      
-        
-#         # # Check if the page exists and has images
-#         # if page_id == "-1" or "images" not in pages[page_id]:
-#         #     return image_urls
-        
-#         # # Get image file names
-#         # image_titles = [img["title"] for img in pages[page_id]["images"]]
-        
-#         # # Filter out non-image files (e.g., icons, svg files, etc. if desired)
-#         # image_titles = [img for img in image_titles if not img.lower().endswith(('.svg', '.ico'))]
-#         # print(image_titles)
-#         img_params = {
-#                 "action": "query",
-#                 "format": "json",
-#                 "titles": title,
-#                 "prop": "imageinfo",
-#                 "iiprop": "url"
-#             }
-            
-#         img_response = requests.get(api_url, params=img_params)
-#         img_data = img_response.json()
-#         print(img_data)
-        
 def get_image_urls(title, limit=5):
     """
-    Get multiple image URLs for a Wikipedia article by title using a more reliable method.
+    Get multiple image URLs for a Wikipedia article by title using multiple methods.
+    Falls back to more generic searches for birds when direct page images aren't available.
     """
     # Base URL for the Wikipedia API
     api_url = "https://en.wikipedia.org/w/api.php"
     
-    # First, we need to get the pageId for the article
-    params = {
-        "action": "query",
-        "format": "json",
-        "titles": title,
-    }
+    image_urls = []
     
     try:
-        # Get page ID
+        # Method 1: Try using parse API first
+        logger.info(f"Attempting to get images for '{title}' using parse API")
+        
+        # First, we need to get the pageId for the article
+        params = {
+            "action": "query",
+            "format": "json",
+            "titles": title,
+        }
+        
         response = requests.get(api_url, params=params, timeout=10)
         data = response.json()
-        print(data)
         
         # Extract page ID
         pages = data.get("query", {}).get("pages", {})
         if not pages:
             logger.warning("No pages found in API response")
-            return []
+        else:
+            page_id = list(pages.keys())[0]
             
-        page_id = list(pages.keys())[0]
+            if page_id != "-1":
+                # Get images with parse API
+                params = {
+                    "action": "parse",
+                    "format": "json",
+                    "pageid": page_id,
+                    "prop": "images"
+                }
+                
+                response = requests.get(api_url, params=params, timeout=10)
+                data = response.json()
+                
+                if "parse" in data and "images" in data["parse"] and data["parse"]["images"]:
+                    # Get image file names
+                    images = data["parse"]["images"]
+                    logger.info(f"Found {len(images)} images with parse API")
+                    
+                    # Filter out non-content images (commons icons, etc.)
+                    filtered_images = [img for img in images if not img.lower().startswith(('icon-', 'commons-', 'edit-'))]
+                    
+                    # Apply limit
+                    filtered_images = filtered_images[:limit]
+                    
+                    # Get URLs for images
+                    for img_name in filtered_images:
+                        img_params = {
+                            "action": "query",
+                            "format": "json",
+                            "titles": f"File:{img_name}",
+                            "prop": "imageinfo",
+                            "iiprop": "url"
+                        }
+                        
+                        img_response = requests.get(api_url, params=img_params, timeout=10)
+                        img_data = img_response.json()
+                        
+                        img_pages = img_data.get("query", {}).get("pages", {})
+                        if img_pages:
+                            img_page_id = list(img_pages.keys())[0]
+                            
+                            if "imageinfo" in img_pages[img_page_id]:
+                                image_url = img_pages[img_page_id]["imageinfo"][0]["url"]
+                                image_urls.append(image_url)
+                else:
+                    logger.warning(f"No images found with parse API for '{title}'")
         
-        if page_id == "-1":
-            logger.warning(f"Page '{title}' not found")
-            return []
+        # Method 2: If no images found, try with fileusage query
+        if not image_urls:
+            logger.info(f"Trying fileusage query for '{title}'")
             
-        # Now use the more reliable approach: get all images directly from the page content
-        params = {
-            "action": "parse",
-            "format": "json",
-            "pageid": page_id,
-            "prop": "images"  # Get all images from the page
-        }
+            # Search for files that are used on pages with this title
+            search_title = title.replace(" ", "_")
+            params = {
+                "action": "query",
+                "format": "json",
+                "list": "search",
+                "srsearch": f"File:{search_title}",
+                "srnamespace": "6",  # File namespace
+                "srlimit": limit
+            }
+            
+            response = requests.get(api_url, params=params, timeout=10)
+            data = response.json()
+            
+            if "query" in data and "search" in data["query"]:
+                search_results = data["query"]["search"]
+                logger.info(f"Found {len(search_results)} files with title search")
+                
+                for result in search_results[:limit]:
+                    file_title = result["title"]
+                    
+                    img_params = {
+                        "action": "query",
+                        "format": "json",
+                        "titles": file_title,
+                        "prop": "imageinfo",
+                        "iiprop": "url"
+                    }
+                    
+                    img_response = requests.get(api_url, params=img_params, timeout=10)
+                    img_data = img_response.json()
+                    
+                    img_pages = img_data.get("query", {}).get("pages", {})
+                    if img_pages:
+                        img_page_id = list(img_pages.keys())[0]
+                        
+                        if "imageinfo" in img_pages[img_page_id]:
+                            image_url = img_pages[img_page_id]["imageinfo"][0]["url"]
+                            image_urls.append(image_url)
         
-        response = requests.get(api_url, params=params, timeout=10)
-        data = response.json()    
-        print(data)
+        # Method 3: If still no images, try searching more generically
+        if not image_urls:
+            logger.info(f"Trying commons category search for '{title}'")
+            
+            # Try searching commons for this bird species
+            commons_search = f"{title} bird"
+            params = {
+                "action": "query",
+                "format": "json",
+                "list": "search",
+                "srsearch": commons_search,
+                "srnamespace": "6",  # File namespace
+                "srlimit": limit
+            }
+            
+            response = requests.get(api_url, params=params, timeout=10)
+            data = response.json()
+            
+            if "query" in data and "search" in data["query"]:
+                search_results = data["query"]["search"]
+                logger.info(f"Found {len(search_results)} files with generic search")
+                
+                for result in search_results[:limit]:
+                    file_title = result["title"]
+                    
+                    img_params = {
+                        "action": "query",
+                        "format": "json",
+                        "titles": file_title,
+                        "prop": "imageinfo",
+                        "iiprop": "url"
+                    }
+                    
+                    img_response = requests.get(api_url, params=img_params, timeout=10)
+                    img_data = img_response.json()
+                    
+                    img_pages = img_data.get("query", {}).get("pages", {})
+                    if img_pages:
+                        img_page_id = list(img_pages.keys())[0]
+                        
+                        if "imageinfo" in img_pages[img_page_id]:
+                            image_url = img_pages[img_page_id]["imageinfo"][0]["url"]
+                            image_urls.append(image_url)
+        
+        # Method 4: If all else fails, try with the generic "bird" category
+        if not image_urls:
+            logger.info(f"Falling back to Wikimedia Commons search for '{title}'")
+            
+            # Search directly in commons
+            commons_api_url = "https://commons.wikimedia.org/w/api.php"
+            params = {
+                "action": "query",
+                "format": "json",
+                "list": "search",
+                "srsearch": f"\"{title}\" bird",
+                "srnamespace": "6",  # File namespace
+                "srlimit": limit
+            }
+            
+            response = requests.get(commons_api_url, params=params, timeout=10)
+            data = response.json()
+            
+            if "query" in data and "search" in data["query"]:
+                search_results = data["query"]["search"]
+                logger.info(f"Found {len(search_results)} files in Commons")
+                
+                for result in search_results[:limit]:
+                    file_title = result["title"]
+                    
+                    img_params = {
+                        "action": "query",
+                        "format": "json",
+                        "titles": file_title,
+                        "prop": "imageinfo",
+                        "iiprop": "url"
+                    }
+                    
+                    img_response = requests.get(commons_api_url, params=img_params, timeout=10)
+                    img_data = img_response.json()
+                    
+                    img_pages = img_data.get("query", {}).get("pages", {})
+                    if img_pages:
+                        img_page_id = list(img_pages.keys())[0]
+                        
+                        if "imageinfo" in img_pages[img_page_id]:
+                            image_url = img_pages[img_page_id]["imageinfo"][0]["url"]
+                            image_urls.append(image_url)
+        
+        # Final fallback - if we still don't have images and you have your fetch_species_images function
+        if not image_urls and 'fetch_species_images' in globals():
+            logger.info(f"Final fallback to web search for '{title}'")
+            return fetch_species_images(f"{title} bird", max_images=limit)
+        
+        logger.info(f"Successfully retrieved {len(image_urls)} image URLs")
+        return image_urls
+        
     except Exception as e:
-        print('error',e)
-   
+        logger.error(f"Error in get_image_urls: {str(e)}")
+        # If we encounter an error but have your fetch_species_images function, use it as fallback
+        if 'fetch_species_images' in globals():
+            logger.info(f"Error encountered, falling back to web search for '{title}'")
+            return fetch_species_images(f"{title} bird", max_images=limit)
+        raise Exception(f"Error processing Wikipedia data: {str(e)}")
+
+        
 def multiple_responses(image_data):
     responses = {}
 
