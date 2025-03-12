@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
-CORS(app, origins=["https://9000-idx-find-the-bird-1740898861496.cluster-3g4scxt2njdd6uovkqyfcabgo6.cloudworkstations.dev/",'*'])
+CORS(app, origins=["https://9000-idx-find-the-bird-1740898861496.cluster-3g4scxt2njdd6uovkqyfcabgo6.cloudworkstations.dev/"])
 # Configure Google Gemini API
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
