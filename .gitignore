@@ -41,3 +41,5 @@ instance/
 config.py
 settings.py
 .vercel
+.env
+__pycache__/main.cpython-311.pyc
