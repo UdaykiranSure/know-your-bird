@@ -40,3 +40,4 @@ htmlcov/
 instance/
 config.py
 settings.py
+.vercel
